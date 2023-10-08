@@ -1,2 +1,3 @@
 twelvedata
 pandas
+mplfinance
