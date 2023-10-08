@@ -1,5 +1,6 @@
 *.csv
 __pycache__*
 chart_log*
+formatted_data*
 .vscode
 .python-version
