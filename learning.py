@@ -130,8 +130,8 @@ if __name__ == "__main__":
         log = []
         init_epoch = 0
 
-    training_data = ExchangeDataset("formatted_data/train_data.json")
-    test_data = ExchangeDataset("formatted_data/test_data.json")
+    training_data = ExchangeDataset("formatted_data/train_data.npz")
+    test_data = ExchangeDataset("formatted_data/test_data.npz")
 
     # Create data loaders.
     train_dataloader = DataLoader(

@@ -90,7 +90,7 @@ def getApproximateParams(origin_chart, t, num):
 
 
 def makeInputData(thread_num, data, start_i, end_i):
-    result = []
+    params, labels = [], []
     for i in tqdm(
         range(end_i - start_i),
         desc=f"Core {thread_num:>2}",
@@ -102,11 +102,11 @@ def makeInputData(thread_num, data, start_i, end_i):
         t = datetime.datetime.fromtimestamp(
             data[settings["base_interval"]]["chart"][start_i + i]["time"]
         )
-        params = []
+        param = []
 
         try:
             for interval in settings["intervals"]:
-                params.extend(
+                param.extend(
                     getApproximateParams(
                         data[interval]["chart"], t, settings["approximate_data_num"]
                     )
@@ -114,15 +114,9 @@ def makeInputData(thread_num, data, start_i, end_i):
             label = getLabel(data[settings["base_interval"]]["chart"], t)
         except ChartRangeError as e:
             continue
-
-        result.append(
-            {
-                "time": data[settings["base_interval"]]["chart"][start_i + i]["time"],
-                "label": label,
-                "params": params,
-            }
-        )
-    return result
+        labels.append(label)
+        params.append(param)
+    return labels, params
 
 
 def wrapper(args):
@@ -134,11 +128,10 @@ if __name__ == "__main__":
 
     data = {}
     for interval in settings["intervals"]:
-        data[interval] = json.load(
-            open("chart_log/" + symbol + "_" + interval + ".json")
-        )
+        with open("chart_log/" + symbol + "_" + interval + ".json") as f:
+            data[interval] = json.load(f)
     start = time.time()
-    output = []
+    labels, params = [], []
     if settings["multi_thread"]:
         results = []
         cores = os.cpu_count() if settings["threads"] == "auto" else settings["threads"]
@@ -153,22 +146,30 @@ if __name__ == "__main__":
         with Pool(cores, initializer=tqdm.set_lock, initargs=(RLock(),)) as p:
             results = p.map(wrapper, split_data)
         for result in results:
-            output.extend(result)
+            labels.extend(result[0])
+            params.extend(result[1])
     else:
-        output = makeInputData(
+        labels, params = makeInputData(
             0, data, 0, len(data[settings["base_interval"]]["chart"])
         )
 
     print("元データ数：", len(data[settings["base_interval"]]["chart"]))
     print("処理時間：", time.time() - start)
-    print("処理データ数：", len(output))
+    print("処理データ数：", len(params))
 
     start = time.time()
     os.makedirs(settings["save_dir"], exist_ok=True)
-    split_index = int(len(output) * 0.2)
-    test_output, train_output = output[:split_index], output[split_index:]
-    with open(settings["save_dir"] + "train_data.json", "w") as outfile:
-        outfile.write(json.dumps(train_output, indent=2))
-    with open(settings["save_dir"] + "test_data.json", "w") as outfile:
-        outfile.write(json.dumps(test_output, indent=2))
+    split_index = int(len(params) * 0.2)
+    test_params, train_params = params[:split_index], params[split_index:]
+    test_labels, train_labels = labels[:split_index], labels[split_index:]
+    np.savez(
+        settings["save_dir"] + "train_data",
+        params=np.array(train_params),
+        labels=np.array(train_labels),
+    )
+    np.savez(
+        settings["save_dir"] + "test_data",
+        params=np.array(test_params),
+        labels=np.array(test_labels),
+    )
     print("保存処理時間：", time.time() - start)
