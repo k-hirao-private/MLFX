@@ -7,33 +7,51 @@ import time
 import pandas as pd
 import pandas.tseries.offsets as offsets
 import json
+import statistics
 
 
 class ChartManager:
     td = TDClient(apikey=settings.chart_log["TDClient_apikey"])
     save_dir = settings.chart_log["save_dir"]
     outputsize = 5000
+    bollinger_range = settings.chart_log["bollinger_range"]
 
-    def download(self, symbol, interval, end_date):
+    def get_data(self, symbol, interval, **kwargs):
         while 1:
             try:
                 log = self.td.time_series(
-                    symbol=symbol,
-                    interval=interval,
-                    start_date=settings.chart_log["start_date"],
-                    end_date=end_date,
-                    outputsize=self.outputsize,
-                    timezone=settings.chart_log["timezone"],
+                    symbol=symbol, interval=interval, **kwargs
                 ).as_pandas()
                 break
             except TwelveDataError as e:
                 print(e)
-                # print("Waiting for API")
                 time.sleep(5)
-
         print(symbol, interval, len(log.index), log.index[0], log.index[-1])
+        return log
+
+    def download(self, symbol, interval, end_date):
+        log = self.get_data(
+            symbol=symbol,
+            interval=interval,
+            start_date=settings.chart_log["start_date"],
+            end_date=end_date,
+            outputsize=self.outputsize,
+            timezone=settings.chart_log["timezone"],
+        )
+
         if len(log.index) < self.outputsize:
-            return log
+            return pd.concat(
+                [
+                    log,
+                    self.get_data(
+                        symbol=symbol,
+                        interval=interval,
+                        end_date=log.index[-1] - offsets.Minute(1),
+                        outputsize=self.bollinger_range,
+                        timezone=settings.chart_log["timezone"],
+                    ),
+                ]
+            )
         else:
             return pd.concat(
                 [
@@ -46,13 +64,28 @@ class ChartManager:
                 ]
             )
 
+    def bollinger(self, i):
+        data = self.df.iloc[
+            i : i + self.bollinger_range, self.df.columns.get_loc("close")
+        ]
+        SMA = statistics.mean(data)
+        sigma = statistics.pstdev(data)
+        return {
+            "SMA": SMA,
+            "bollinger_upper": SMA + sigma,
+            "bollinger_lower": SMA - sigma,
+        }
+        pass
+
     def update(self):
         os.makedirs(self.save_dir, exist_ok=True)
         updated_files = 0
 
         for symbol in settings.chart_log["symbols"]:
             for interval in settings.chart_log["intervals"]:
-                df = self.download(symbol, interval, end_date=datetime.date.today())
+                self.df = self.download(
+                    symbol, interval, end_date=datetime.date.today()
+                )
 
                 file_name = symbol.replace("/", "-") + "_" + interval + ".json"
 
@@ -63,14 +96,15 @@ class ChartManager:
                     "chart": None,
                 }
                 data["chart"] = [
-                    {
-                        "time": int(item.Index.timestamp()),
-                        "open": item.open,
-                        "high": item.high,
-                        "low": item.low,
-                        "close": item.close,
-                    }
-                    for item in df.itertuples()
+                    dict(
+                        time=int(self.df.iloc[i].name.timestamp()),
+                        open=self.df.iloc[i].open,
+                        high=self.df.iloc[i].high,
+                        low=self.df.iloc[i].low,
+                        close=self.df.iloc[i].close,
+                        **self.bollinger(i)
+                    )
+                    for i in range(0, len(self.df) - self.bollinger_range)
                 ]
                 json_object = json.dumps(data, indent=4)
                 with open(self.save_dir + file_name, "w") as outfile:

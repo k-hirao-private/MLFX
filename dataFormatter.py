@@ -2,12 +2,10 @@ import json
 import datetime
 import os
 import numpy as np
-from scipy.optimize import curve_fit
 import time
 from multiprocessing import Pool, freeze_support, RLock
 from enum import IntEnum
 from tqdm import tqdm
-import pickle
 
 from settings import data_formatter as settings
 
@@ -31,10 +29,10 @@ def getLatestDataIndex(chart, t, max_index, min_index):
 
 
 class Label(IntEnum):
-    DOWN = 1  # 減少
+    DOWN = 0  # 減少
+    UP = 1  # 増加
     CONVEX_DOWN = 2  # 凸型減少
     CONCAVE_UP = 3  # 凹型増加
-    UP = 4  # 増加
 
 
 def getLabel(chart, t):
@@ -79,10 +77,10 @@ def getApproximateParams(origin_chart, t, num):
 
     params = []
     x = np.linspace(0, 1 - num, num)
-    for column in ["open", "low", "high", "close"]:
+    for column in settings["columns"]:
         rate = np.array(
             [
-                partial_chart[i][column] - partial_chart[0][column]
+                partial_chart[i][column] - partial_chart[0][settings["base_column"]]
                 for i in range(len(partial_chart))
             ]
         )
@@ -167,7 +165,10 @@ if __name__ == "__main__":
 
     start = time.time()
     os.makedirs(settings["save_dir"], exist_ok=True)
-    json_object = json.dumps(output, indent=2)
-    with open(settings["save_dir"] + "data.json", "w") as outfile:
-        outfile.write(json_object)
+    split_index = int(len(output) * 0.2)
+    test_output, train_output = output[:split_index], output[split_index:]
+    with open(settings["save_dir"] + "train_data.json", "w") as outfile:
+        outfile.write(json.dumps(train_output, indent=2))
+    with open(settings["save_dir"] + "test_data.json", "w") as outfile:
+        outfile.write(json.dumps(test_output, indent=2))
     print("保存処理時間：", time.time() - start)
