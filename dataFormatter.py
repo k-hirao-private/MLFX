@@ -30,9 +30,10 @@ def getLatestDataIndex(chart, t, max_index, min_index):
 
 class Label(IntEnum):
     DOWN = 0  # 減少
-    UP = 1  # 増加
-    CONVEX_DOWN = 2  # 凸型減少
-    CONCAVE_UP = 3  # 凹型増加
+    FLAT = 1  # 横ばい
+    UP = 2  # 増加
+    CONVEX_DOWN = 3  # 凸型減少
+    CONCAVE_UP = 4  # 凹型増加
 
 
 def getLabel(chart, t):
@@ -47,8 +48,8 @@ def getLabel(chart, t):
             raise ChartRangeError
         current_rate = chart[current_index]
 
-        max_rate = max([max_rate, current_rate["close"]])
-        min_rate = min([min_rate, current_rate["close"]])
+        max_rate = max([max_rate, current_rate["high"]])
+        min_rate = min([min_rate, current_rate["low"]])
 
         if max_rate - base_rate["close"] > settings["margin_pips"] / 100:
             if min_rate - base_rate["close"] < -settings["middle_pips"] / 100:
@@ -62,11 +63,14 @@ def getLabel(chart, t):
             else:
                 label = Label.DOWN
             break
+        elif base_index - current_index >= settings["label_data_range"]:
+            label = Label.FLAT
+            break
 
     return label
 
 
-def getApproximateParams(origin_chart, t, num):
+def getParams(origin_chart, t, num):
     base_index = getLatestDataIndex(
         origin_chart, t.timestamp(), len(origin_chart) - 1, 0
     )
@@ -78,13 +82,16 @@ def getApproximateParams(origin_chart, t, num):
     params = []
     x = np.linspace(0, 1 - num, num)
     for column in settings["columns"]:
-        rate = np.array(
-            [
-                partial_chart[i][column] - partial_chart[0][settings["base_column"]]
-                for i in range(len(partial_chart))
-            ]
-        )
-        params.extend(np.polyfit(x, rate, settings["approximate_dim"]))
+        if settings["approximation"]:
+            rate = np.array(
+                [
+                    partial_chart[i][column] - partial_chart[0][settings["base_column"]]
+                    for i in range(len(partial_chart))
+                ]
+            )
+            params.extend(np.polyfit(x, rate, settings["approximate_dim"]))
+        else:
+            params.extend([d[column] - partial_chart[0][column] for d in partial_chart])
 
     return params
 
@@ -107,9 +114,7 @@ def makeInputData(thread_num, data, start_i, end_i):
         try:
             for interval in settings["intervals"]:
                 param.extend(
-                    getApproximateParams(
-                        data[interval]["chart"], t, settings["approximate_data_num"]
-                    )
+                    getParams(data[interval]["chart"], t, settings["data_num"])
                 )
             label = getLabel(data[settings["base_interval"]]["chart"], t)
         except ChartRangeError as e:

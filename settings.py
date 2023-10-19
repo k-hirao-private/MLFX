@@ -37,8 +37,10 @@ data_formatter = {
     "threads": "auto",
     "prog_interval": 1.0,
     "margin_pips": 10,
-    "middle_pips": 10,
-    "approximate_data_num": 10,
+    "middle_pips": 10000,
+    "data_num": 30,
+    "approximation": True,
+    "label_data_range": 6,
     "approximate_dim": 4,
     "save_dir": "formatted_data/",
 }
