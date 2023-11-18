@@ -11,14 +11,17 @@ import sys
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+from plot_thread import PlotThread
+
+
 np.set_printoptions(precision=3, suppress=True)
 
 
 from data_set import ExchangeDataset
 
-batch_size = 512
+batch_size = 64
 label_kinds = 2
-epochs = 7000
+epochs = 20000
 
 
 class NeuralNetwork(nn.Module):
@@ -26,16 +29,17 @@ class NeuralNetwork(nn.Module):
         super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
-            nn.Linear(175, 128),
+            nn.Linear(5 * (7 * 5 + 0), 256),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, 64),
+            nn.Dropout(0.2),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(64, 64),
+            nn.Dropout(0.2),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(64, label_kinds),
+            nn.Dropout(0.2),
+            nn.Linear(256, label_kinds),
+            nn.Softmax(dim=1),
         )
 
     def forward(self, x):
@@ -52,11 +56,12 @@ def train(dataloader, model, loss_fn, optimizer, epoch):
     for batch, (X, y) in enumerate(
         tqdm(
             dataloader,
-            desc=f"Epoch {epoch}",
+            desc=f"Train:",
             disable=False,
             leave=False,
             ncols=80,
             unit="batch",
+            mininterval=0.5,
             # dynamic_ncols=True,
         )
     ):
@@ -86,7 +91,18 @@ def test(dataloader, model, loss_fn):
     test_loss, correct = 0, 0
     result_mat = np.zeros((label_kinds, label_kinds))
     with torch.no_grad():
-        for X, y in dataloader:
+        for batch, (X, y) in enumerate(
+            tqdm(
+                dataloader,
+                desc=f"Test:",
+                disable=False,
+                leave=False,
+                ncols=80,
+                unit="batch",
+                mininterval=0.5,
+                # dynamic_ncols=True,
+            )
+        ):
             X, y = X.to(device), y.to(device)
             pred = model(X)
             test_loss += loss_fn(pred, y).item()
@@ -104,6 +120,18 @@ def test(dataloader, model, loss_fn):
     print(result_mat / size)
 
     return correct, test_loss, result_mat
+
+
+def plot(log, t):
+    plt.cla()
+    x = np.linspace(1, t + 1, t + 1)
+    plt.plot(x, [l["train_correct"] for l in log], label="train_correct")
+    plt.plot(x, [l["train_loss"] for l in log], label="train_loss")
+    plt.plot(x, [l["test_correct"] for l in log], label="test_correct")
+    plt.plot(x, [l["test_loss"] for l in log], label="test_loss")
+    plt.grid()
+    plt.legend()
+    plt.pause(0.1)
 
 
 if __name__ == "__main__":
@@ -130,8 +158,8 @@ if __name__ == "__main__":
         log = []
         init_epoch = 0
 
-    training_data = ExchangeDataset("formatted_data/train_data.npz")
-    test_data = ExchangeDataset("formatted_data/test_data.npz")
+    training_data = ExchangeDataset("formatted_data/train_data.npz", noise=True)
+    test_data = ExchangeDataset("formatted_data/test_data.npz", noise=False)
 
     # Create data loaders.
     train_dataloader = DataLoader(
@@ -147,8 +175,12 @@ if __name__ == "__main__":
         pin_memory=True,
     )
 
-    loss_fn = nn.CrossEntropyLoss()
+    weight = torch.reciprocal(training_data.label_distribution())
+    loss_fn = nn.CrossEntropyLoss(weight=weight.to(device))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+
+    plot_thread = PlotThread()
+    plot_thread.start()
 
     try:
         for t in range(init_epoch, init_epoch + epochs):
@@ -160,8 +192,8 @@ if __name__ == "__main__":
             )
             test_correct, test_loss, result_mat = test(test_dataloader, model, loss_fn)
             print(
-                f"train_correct: {(100*train_correct):>0.1f}%, train_loss:{train_loss:>8f}",
-                f"test_correct: {(100*test_correct):>0.1f}%, test_loss:{test_loss:>8f} \n",
+                f"train_correct: {(100*train_correct):>0.2f}%, train_loss:{train_loss:>8f}",
+                f"test_correct: {(100*test_correct):>0.2f}%, test_loss:{test_loss:>8f} \n",
             )
             log.append(
                 {
@@ -173,16 +205,7 @@ if __name__ == "__main__":
                     "result_mat": result_mat.tolist(),
                 }
             )
-
-            plt.cla()
-            x = np.linspace(1, t + 1, t + 1)
-            plt.plot(x, [l["train_correct"] for l in log], label="train_correct")
-            plt.plot(x, [l["train_loss"] for l in log], label="train_loss")
-            plt.plot(x, [l["test_correct"] for l in log], label="test_correct")
-            plt.plot(x, [l["test_loss"] for l in log], label="test_loss")
-            plt.grid()
-            plt.legend()
-            plt.pause(0.1)
+            plot_thread.update(log)
     except KeyboardInterrupt:
         pass
 
@@ -193,4 +216,6 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), f"model/{file_name}.pth")
     open(f"model/{file_name}.json", "w").write(json.dumps(log, indent=4))
     plt.savefig(f"model/{file_name}.png")
+    plot_thread.kill()
+    plot_thread.join()
     print(f"Saved PyTorch Model State to {file_name}.pth")
