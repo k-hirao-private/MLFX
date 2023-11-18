@@ -150,13 +150,17 @@ if __name__ == "__main__":
         freeze_support()
         with Pool(cores, initializer=tqdm.set_lock, initargs=(RLock(),)) as p:
             results = p.map(wrapper, split_data)
-        for result in results:
-            labels.extend(result[0])
-            params.extend(result[1])
+
+        for i in range(len(results)):
+            labels.extend(results[i][0])
+            params.extend(results[i][1])
+            results[i] = None
     else:
         labels, params = makeInputData(
             0, data, 0, len(data[settings["base_interval"]]["chart"])
         )
+    labels = np.array(labels, dtype=np.int8)
+    params = np.array(params, dtype=np.float32)
 
     print("元データ数：", len(data[settings["base_interval"]]["chart"]))
     print("処理時間：", time.time() - start)
