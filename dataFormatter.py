@@ -9,6 +9,8 @@ from tqdm import tqdm
 
 from settings import data_formatter as settings
 
+from param_func import candle
+
 
 class ChartRangeError(Exception):
     pass
@@ -30,8 +32,8 @@ def getLatestDataIndex(chart, t, max_index, min_index):
 
 class Label(IntEnum):
     DOWN = 0  # 減少
-    FLAT = 1  # 横ばい
-    UP = 2  # 増加
+    UP = 1  # 増加
+    FLAT = 2  # 横ばい
     CONVEX_DOWN = 3  # 凸型減少
     CONCAVE_UP = 4  # 凹型増加
 
@@ -82,18 +84,45 @@ def getParams(origin_chart, t, num):
     params = []
     x = np.linspace(0, 1 - num, num)
     for column in settings["columns"]:
+        rate = np.array(
+            [
+                partial_chart[i][column] - partial_chart[0][settings["base_column"]]
+                for i in range(len(partial_chart))
+            ]
+        )
         if settings["approximation"]:
-            rate = np.array(
-                [
-                    partial_chart[i][column] - partial_chart[0][settings["base_column"]]
-                    for i in range(len(partial_chart))
-                ]
-            )
             params.extend(np.polyfit(x, rate, settings["approximate_dim"]))
         else:
-            params.extend([d[column] - partial_chart[0][column] for d in partial_chart])
+            params.extend(rate)
+
+        if settings["add_candle"]:
+            candle_param = candle(partial_chart)
+            params.extend(candle_param)
 
     return params
+
+
+def validation(chart, t, num):
+    base_i = getLatestDataIndex(chart, t.timestamp(), len(chart) - 1, 0)
+    try:
+        for i in range(num):
+            if settings["validation_type"] == "upper":
+                if (
+                    not chart[base_i + i]["bollinger_upper"]
+                    < chart[base_i + i]["close"]
+                ):
+                    return False
+            elif settings["validation_type"] == "lower":
+                if (
+                    not chart[base_i + i]["bollinger_lower"]
+                    > chart[base_i + i]["close"]
+                ):
+                    return False
+            else:
+                raise Exception('validation_type is "upper" or "lower"')
+    except IndexError as e:
+        raise ChartRangeError
+    return True
 
 
 def makeInputData(thread_num, data, start_i, end_i):
@@ -107,16 +136,25 @@ def makeInputData(thread_num, data, start_i, end_i):
         mininterval=settings["prog_interval"],
     ):
         t = datetime.datetime.fromtimestamp(
-            data[settings["base_interval"]]["chart"][start_i + i]["time"]
+            data[settings["output_interval"]]["chart"][start_i + i]["time"]
         )
-        param = []
 
         try:
+            valid = True
+            for interval in settings["validation_interval"]:
+                valid = valid and validation(
+                    data[interval]["chart"],
+                    t,
+                    settings["validation_items"],
+                )
+            if not valid:
+                continue
+            param = []
             for interval in settings["intervals"]:
                 param.extend(
                     getParams(data[interval]["chart"], t, settings["data_num"])
                 )
-            label = getLabel(data[settings["base_interval"]]["chart"], t)
+            label = getLabel(data[settings["output_interval"]]["chart"], t)
         except ChartRangeError as e:
             continue
         labels.append(label)
@@ -141,7 +179,7 @@ if __name__ == "__main__":
         results = []
         cores = os.cpu_count() if settings["threads"] == "auto" else settings["threads"]
         split_index = np.linspace(
-            0, len(data[settings["base_interval"]]["chart"]), cores + 1, dtype="int"
+            0, len(data[settings["output_interval"]]["chart"]), cores + 1, dtype="int"
         )
         split_data = [
             (thread_num, data, split_index[thread_num], split_index[thread_num + 1])
@@ -157,12 +195,12 @@ if __name__ == "__main__":
             results[i] = None
     else:
         labels, params = makeInputData(
-            0, data, 0, len(data[settings["base_interval"]]["chart"])
+            0, data, 0, len(data[settings["output_interval"]]["chart"])
         )
     labels = np.array(labels, dtype=np.int8)
     params = np.array(params, dtype=np.float32)
 
-    print("元データ数：", len(data[settings["base_interval"]]["chart"]))
+    print("元データ数：", len(data[settings["output_interval"]]["chart"]))
     print("処理時間：", time.time() - start)
     print("処理データ数：", len(params))
 
