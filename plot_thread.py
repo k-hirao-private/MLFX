@@ -15,6 +15,7 @@ class PlotThread(Thread):
 
     def kill(self):
         self.killed = True
+        self.join()
 
     def update(self, log):
         self.log = log
@@ -55,4 +56,3 @@ if __name__ == "__main__":
         plot_thread.update(log[: t + 1])
         time.sleep(0.1)
     plot_thread.kill()
-    plot_thread.join()
