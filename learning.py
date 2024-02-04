@@ -41,7 +41,7 @@ class LearningBase:
     def set_optimizer(self, optimizer):
         self.optimizer = optimizer
 
-    def train(self):
+    def train(self, correct_fn):
         size = len(self.train_dataloader.dataset)
         num_batches = len(self.train_dataloader)
         self.model.train()
@@ -62,7 +62,7 @@ class LearningBase:
 
             # Compute prediction error
             pred = self.model(X)
-            loss = self.loss_fn(pred, y)
+            loss = self.loss_fn(pred.squeeze(), y)
 
             # Backpropagation
             loss.backward()
@@ -70,23 +70,18 @@ class LearningBase:
             self.optimizer.zero_grad()
 
             train_loss += loss
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+            correct += correct_fn(pred, y)
+            # correct += (pred.argmax(1) == y).type(torch.float).sum().item()
 
         train_loss /= num_batches
         correct /= size
         return correct, train_loss.item()
 
-    def test(self, statistics_fn):
+    def test(self, correct_fn, statistics_fn, statistics):
         size = len(self.test_dataloader.dataset)
         num_batches = len(self.test_dataloader)
         self.model.eval()
         test_loss, correct = 0, 0
-        statistics = np.zeros(
-            (
-                self.test_dataloader.dataset.label_kinds,
-                self.test_dataloader.dataset.label_kinds,
-            )
-        )
         with torch.no_grad():
             for batch, (X, y) in enumerate(
                 tqdm(
@@ -104,17 +99,16 @@ class LearningBase:
 
                 pred = self.model(X)
 
-                test_loss += self.loss_fn(pred, y).item()
-                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+                test_loss += self.loss_fn(pred.squeeze(), y).item()
+                correct += correct_fn(pred, y)
+                # correct += (pred.argmax(1) == y).type(torch.float).sum().item()
 
-                statistics_fn(
-                    statistics, self.test_dataloader.dataset.label_kinds, pred, y
-                )
+                statistics_fn(statistics, pred, y, batch)
 
         test_loss /= num_batches
         correct /= size
 
-        return correct, test_loss, statistics
+        return correct, test_loss
 
     def saveModel(self, path):
         torch.save(self.model.state_dict(), path)

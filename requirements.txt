@@ -2,7 +2,10 @@ twelvedata
 pandas
 mplfinance
 tqdm
+numpy
+matplotlib
 
 torch
 torchvision
-torchaudio --index-url https://download.pytorch.org/whl/cu117
+# torchaudio --index-url https://download.pytorch.org/whl/cu117
+torchaudio --index-url https://download.pytorch.org/whl/cpu

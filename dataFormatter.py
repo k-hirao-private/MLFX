@@ -6,10 +6,14 @@ import time
 from multiprocessing import Pool, freeze_support, RLock
 from enum import IntEnum
 from tqdm import tqdm
+from debag_plot import mpf_plot
+from intervals import str_to_interval
 
 from settings import data_formatter as settings
 
 from param_func import candle
+
+np.set_printoptions(precision=3, suppress=True)
 
 
 class ChartRangeError(Exception):
@@ -69,6 +73,37 @@ def getLabel(chart, t):
             label = Label.FLAT
             break
 
+    return label
+
+
+hoge = 0
+
+
+def getLabel2(chart, t, period, interval):
+    base_index = getLatestDataIndex(chart, t.timestamp(), len(chart) - 1, 0) + 1
+    try:
+        partial_chart = [chart[base_index - i] for i in range(period)]
+    except IndexError as e:
+        raise ChartRangeError
+    rate = np.array(
+        [
+            partial_chart[i]["close"] - partial_chart[0]["open"]
+            for i in range(len(partial_chart))
+        ]
+    )
+    x = np.linspace(0, period - 1, period) * str_to_interval(interval, "hour")
+    weight = np.ones(len(x))
+    x = np.append(x, 0)
+    y = np.append(rate, 0)
+    weight = np.append(weight, 1e3)
+    label = np.polyfit(x, y, 1, w=weight)[0]
+    # print(
+    #     label,
+    #     partial_chart[0]["open"],
+    #     partial_chart[period - 1]["close"],
+    #     partial_chart[period - 1]["close"] - partial_chart[0]["open"],
+    # )
+    # mpf_plot(partial_chart)
     return label
 
 
@@ -154,7 +189,12 @@ def makeInputData(thread_num, data, start_i, end_i):
                 param.extend(
                     getParams(data[interval]["chart"], t, settings["data_num"])
                 )
-            label = getLabel(data[settings["output_interval"]]["chart"], t)
+            label = getLabel2(
+                data[settings["output_interval"]]["chart"],
+                t,
+                settings["label_data_range"],
+                settings["output_interval"],
+            )
         except ChartRangeError as e:
             continue
         labels.append(label)
@@ -197,7 +237,7 @@ if __name__ == "__main__":
         labels, params = makeInputData(
             0, data, 0, len(data[settings["output_interval"]]["chart"])
         )
-    labels = np.array(labels, dtype=np.int8)
+    labels = np.array(labels, dtype=np.float32)
     params = np.array(params, dtype=np.float32)
 
     print("元データ数：", len(data[settings["output_interval"]]["chart"]))
